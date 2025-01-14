@@ -1,40 +1,85 @@
-import tensorflow as tf
-from tensorflow.keras import layers, models
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-def unet_model(input_size=(224, 224, 3)):
-    inputs = tf.keras.Input(input_size)
-    
-    # Encoder (Downsampling)
-    conv1 = layers.Conv2D(64, 3, activation='relu', padding='same')(inputs)
-    conv1 = layers.Conv2D(64, 3, activation='relu', padding='same')(conv1)
-    pool1 = layers.MaxPooling2D(pool_size=(2, 2))(conv1)
-    
-    conv2 = layers.Conv2D(128, 3, activation='relu', padding='same')(pool1)
-    conv2 = layers.Conv2D(128, 3, activation='relu', padding='same')(conv2)
-    pool2 = layers.MaxPooling2D(pool_size=(2, 2))(conv2)
-    
-    # Bridge
-    conv3 = layers.Conv2D(256, 3, activation='relu', padding='same')(pool2)
-    conv3 = layers.Conv2D(256, 3, activation='relu', padding='same')(conv3)
-    
-    # Decoder (Upsampling)
-    up4 = layers.UpSampling2D(size=(2, 2))(conv3)
-    up4 = layers.concatenate([up4, conv2])
-    conv4 = layers.Conv2D(128, 3, activation='relu', padding='same')(up4)
-    conv4 = layers.Conv2D(128, 3, activation='relu', padding='same')(conv4)
-    
-    up5 = layers.UpSampling2D(size=(2, 2))(conv4)
-    up5 = layers.concatenate([up5, conv1])
-    conv5 = layers.Conv2D(64, 3, activation='relu', padding='same')(up5)
-    conv5 = layers.Conv2D(64, 3, activation='relu', padding='same')(conv5)
-    
-    outputs = layers.Conv2D(1, 1, activation='sigmoid')(conv5)
-    
-    model = models.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-    
-    return model
+class DoubleConv(nn.Module):
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
 
-# Create the model
-model = unet_model()
-model.summary()
+    def forward(self, x):
+        return self.double_conv(x)
+
+class UNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512], dropout_rate=0.5, deep_supervision=False):
+        super().__init__()
+        self.deep_supervision = deep_supervision
+        self.encoder = nn.ModuleList()
+        self.decoder = nn.ModuleList()
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        # Encoder
+        for feature in features:
+            self.encoder.append(DoubleConv(in_channels, feature))
+            in_channels = feature
+
+        # Decoder
+        for feature in reversed(features):
+            self.decoder.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
+            self.decoder.append(DoubleConv(feature*2, feature))
+
+        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
+        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
+        self.dropout = nn.Dropout2d(dropout_rate)
+
+        if self.deep_supervision:
+            self.deep_outputs = nn.ModuleList([nn.Conv2d(f, out_channels, kernel_size=1) for f in features])
+
+    def forward(self, x):
+        skip_connections = []
+        deep_outputs = []
+
+        # Encoder
+        for encoder in self.encoder:
+            x = encoder(x)
+            skip_connections.append(x)
+            x = self.pool(x)
+            x = self.dropout(x)
+
+        x = self.bottleneck(x)
+        x = self.dropout(x)
+
+        skip_connections = skip_connections[::-1]
+
+        # Decoder
+        for idx in range(0, len(self.decoder), 2):
+            x = self.decoder[idx](x)
+            skip_connection = skip_connections[idx//2]
+
+            if x.shape != skip_connection.shape:
+                x = F.interpolate(x, size=skip_connection.shape[2:], mode="bilinear", align_corners=True)
+
+            concat_skip = torch.cat((skip_connection, x), dim=1)
+            x = self.decoder[idx+1](concat_skip)
+            x = self.dropout(x)
+
+            if self.deep_supervision:
+                deep_outputs.append(self.deep_outputs[idx//2](x))
+
+        x = self.final_conv(x)
+        output = torch.sigmoid(x)
+
+        if self.deep_supervision:
+            deep_outputs.append(output)
+            return deep_outputs
+        else:
+            return output
