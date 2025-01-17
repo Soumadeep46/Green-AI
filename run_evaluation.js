@@ -2,7 +2,7 @@ const { exec } = require('child_process');
 
 console.log("Evaluating model and generating accuracy graph...");
 
-exec('python evaluate_model_with_graph.py', (error, stdout, stderr) => {
+exec('eval.py', (error, stdout, stderr) => {
   if (error) {
     console.error(`Error: ${error.message}`);
     return;
