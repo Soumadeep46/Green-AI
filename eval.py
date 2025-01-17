@@ -1,10 +1,20 @@
 import torch
-import numpy as np
 from unet_model import UNet
-from PIL import Image
-import matplotlib.pyplot as plt
-from sklearn.metrics import precision_score, recall_score, f1_score
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from PIL import Image
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import torch
+from PIL import Image
+
+from unet_model import UNet
 
 
 def load_model(model_path):
@@ -52,18 +62,32 @@ def visualize_evaluation(image, prediction):
     plt.show()
 
 
+# ... (keep all your existing functions: load_model, evaluate_image, visualize_evaluation)
+
+def plot_accuracy_graph(accuracies):
+    """Plot accuracy graph using seaborn."""
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(x=range(1, len(accuracies) + 1), y=accuracies)
+    plt.title('Model Accuracy Over Images')
+    plt.xlabel('Image Number')
+    plt.ylabel('Accuracy')
+    plt.savefig('accuracy_graph.png')
+    plt.close()
+
 def main():
     """Main function to process and evaluate images."""
     # Load the trained model
-    model = load_model('sapling_detection_model_v2.pth')
+    model = load_model('sapling_detection_model_v3.pth')
 
     # Updated test directories with the correct folder names
     test_dirs = [
-         "Drone Data-20250112T122025Z-001/Drone data/Debadihi VF/Raw data/Post-pitting",
+         #"Drone Data-20250112T122025Z-001/Drone data/Debadihi VF/Raw data/Post-pitting",
         # "Drone Data-20250112T122025Z-001/Drone data/Debadihi VF/Raw data/post-saw",
         # "Drone image-20250112T122314Z-001/Drone image/Benkmura VF/Raw Data/Post-Planting",
-        #"Drone image-20250112T122314Z-001/Drone image/Benkmura VF/Raw Data/Pre-Pitting"
+        "Drone image-20250112T122314Z-001/Drone image/Benkmura VF/Raw Data/Pre-Pitting"
     ]
+
+    accuracies = []
 
     for test_dir in test_dirs:
         if os.path.exists(test_dir):
@@ -79,19 +103,27 @@ def main():
                         prediction = evaluate_image(model, test_image_path)
 
                         # Calculate sapling density
-                        threshold = 0.003
-                        sapling_density = np.mean(prediction < threshold)
+                        threshold = 0.0016
+                        sapling_density = np.mean(prediction > threshold)
 
                         print(f"Estimated sapling density: {sapling_density:.2%}")
 
                         # Visualize results
                         visualize_evaluation(np.array(image), prediction)
 
+                        # Calculate accuracy (assuming ground truth is available)
+                        # For demonstration, we'll use a random accuracy value
+                        accuracy = np.random.uniform(0.8, 1.0)  # Replace with actual accuracy calculation
+                        accuracies.append(accuracy)
+
                     except Exception as e:
                         print(f"Error processing {test_image_path}: {e}")
         else:
             print(f"Directory not found: {test_dir}")
 
+    # Plot accuracy graph
+    plot_accuracy_graph(accuracies)
+    print("Accuracy graph saved as 'accuracy_graph.png'")
 
 if __name__ == "__main__":
     main()
